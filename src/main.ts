@@ -1,99 +1,154 @@
-import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
-import {DEFAULT_SETTINGS, MyPluginSettings, SampleSettingTab} from "./settings";
+import {
+	App,
+	Plugin,
+	FuzzySuggestModal,
+	FuzzyMatch,
+	prepareFuzzySearch,
+	MarkdownView
+} from "obsidian";
 
-// Remember to rename these classes and interfaces!
+import { SymbolMapperSettings, SymbolMapperSettingTab, DEFAULT_SETTINGS } from "./settings";
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+interface SymbolEntry {
+	keywords: string[];
+	description?: string;
+}
+
+interface SymbolMap {
+	[char: string]: SymbolEntry;
+}
+
+export default class SymbolMapperPlugin extends Plugin {
+	settings: SymbolMapperSettings;
+	symbolMap: SymbolMap;
 
 	async onload() {
 		await this.loadSettings();
+		this.parseCharMap();
 
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
-
-		// This adds a simple command that can be triggered anywhere
 		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
+			id: "open-symbol-search",
+			name: "Insert Symbol",
+			hotkeys: [
+				{ modifiers: ["Ctrl", "Shift"], key: "/" }
+			],
 			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				editor.replaceSelection('Sample editor command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-				return false;
+				new SymbolSearchModal(this.app, this.symbolMap).open();
 			}
 		});
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			new Notice("Click");
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-
+		this.addSettingTab(new SymbolMapperSettingTab(this.app, this));
 	}
 
-	onunload() {
+	parseCharMap() {
+		try {
+			this.symbolMap = JSON.parse(this.settings.symbolMap);
+		} catch (e) {
+			console.error("Invalid JSON in settings:", e);
+			this.symbolMap = {};
+		}
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<MyPluginSettings>);
+		this.settings = Object.assign(
+			{},
+			DEFAULT_SETTINGS,
+			await this.loadData()
+		);
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+		this.parseCharMap();
 	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
+
+class SymbolSearchModal extends FuzzySuggestModal<string> {
+	symbolMap: SymbolMap;
+
+	constructor(app: App, symbolMap: SymbolMap) {
 		super(app);
+		this.symbolMap = symbolMap;
 	}
 
-	onOpen() {
-		let {contentEl} = this;
-		contentEl.setText('Woah!');
+	getItems(): string[] {
+		return Object.keys(this.symbolMap);
 	}
 
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
+	getItemText(item: string): string {
+		// const entry = this.symbolMap[item];
+		// if (entry && entry.description) {
+		// 	return `${item} - ${entry.description}`;
+		// }
+		return item;
+	}
+
+	// fuzzy search should match keywords and nothing else
+	getSuggestions(query: string): FuzzyMatch<string>[] {
+		if (!query) {
+			return this.getItems().map((char) => ({
+				item: char,
+				match: { score: 0, matches: [] }
+			}));
+		}
+
+		const lower = query.toLowerCase();
+		const results: FuzzyMatch<string>[] = [];
+
+		for (const char of Object.keys(this.symbolMap)) {
+			const entry = this.symbolMap[char];
+
+			if (!entry) continue;
+
+			// what counts as searchable text
+			const searchable = [
+				// char,
+				// entry.description ?? "",
+				...entry.keywords
+			].join(" ");
+
+			const search = prepareFuzzySearch(lower);
+			const match = search(searchable);
+
+			if (match) {
+				results.push({
+					item: char,
+					match
+				});
+			}
+		}
+
+		return results.sort((a, b) => b.match.score - a.match.score);
+	}
+
+	renderSuggestion(match: FuzzyMatch<string>, el: HTMLElement) {
+		const char = match.item;
+		const entry = this.symbolMap[char];
+
+		el.empty();
+
+		const container = el.createDiv({
+			cls: "symbol-suggestion"
+		});
+
+		container.createSpan({
+			text: char,
+			cls: "symbol"
+		});
+
+		if (entry && entry.description) {
+			container.createSpan({
+				text: ` - ${entry.description}`,
+				cls: "symbol-description"
+			});
+		}
+	}
+
+	onChooseItem(char: string): void {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!view) return;
+
+		view.editor.replaceSelection(char);
 	}
 }
