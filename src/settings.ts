@@ -30,10 +30,9 @@ export class SymbolMapperSettingTab extends PluginSettingTab {
 		let { containerEl } = this;
 
 		containerEl.empty();
-		containerEl.createEl("h2", { text: "Special Characters Mapping" });
 
 		new Setting(containerEl)
-			.setName("JSON Mapping")
+			.setName("Symbol map")
 			.setDesc("Map special characters to fuzzy search keywords.")
 			.addTextArea((text) =>
 				text

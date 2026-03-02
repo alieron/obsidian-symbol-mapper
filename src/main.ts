@@ -28,10 +28,10 @@ export default class SymbolMapperPlugin extends Plugin {
 
 		this.addCommand({
 			id: "open-symbol-search",
-			name: "Insert Symbol",
-			hotkeys: [
-				{ modifiers: ["Ctrl", "Shift"], key: "/" }
-			],
+			name: "Insert symbol",
+			// hotkeys: [
+			// 	{ modifiers: ["Ctrl", "Shift"], key: "/" }
+			// ],
 			callback: () => {
 				new SymbolSearchModal(this.app, this.symbolMap).open();
 			}
@@ -42,7 +42,7 @@ export default class SymbolMapperPlugin extends Plugin {
 
 	parseCharMap() {
 		try {
-			this.symbolMap = JSON.parse(this.settings.symbolMap);
+			this.symbolMap = JSON.parse(this.settings.symbolMap) as SymbolMap;
 		} catch (e) {
 			console.error("Invalid JSON in settings:", e);
 			this.symbolMap = {};
@@ -54,7 +54,7 @@ export default class SymbolMapperPlugin extends Plugin {
 			{},
 			DEFAULT_SETTINGS,
 			await this.loadData()
-		);
+		) as SymbolMapperSettings;
 	}
 
 	async saveSettings() {
